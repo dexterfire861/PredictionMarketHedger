@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any, TypedDict
 
@@ -24,6 +25,55 @@ UNIFIED_CONTRACT_FIELDS = [
     "time_horizon",
     "basis_risk_notes",
     "url",
+    "snapshot_ts",
+    "as_of_ts",
+]
+
+
+CONTRACT_ENTITY_FIELDS = [
+    "source",
+    "contract_id",
+    "event_id",
+    "question",
+    "description",
+    "resolution_source",
+    "category_raw",
+    "risk_category",
+    "risk_tags",
+    "market_type",
+    "subject_key",
+    "metric_key",
+    "comparator",
+    "threshold_value",
+    "threshold_unit",
+    "region_key",
+    "window_start_ts",
+    "window_end_ts",
+    "expiration_ts",
+    "geo_scope",
+    "time_horizon",
+    "basis_risk_notes",
+    "url",
+    "first_seen_ts",
+    "last_seen_ts",
+]
+
+
+CONTRACT_SNAPSHOT_FIELDS = [
+    "source",
+    "contract_id",
+    "as_of_date",
+    "as_of_ts",
+    "snapshot_ts",
+    "observation_method",
+    "implied_probability",
+    "yes_price",
+    "no_price",
+    "volume",
+    "liquidity",
+    "open_interest",
+    "active",
+    "tradable",
 ]
 
 
@@ -47,6 +97,53 @@ class NormalizedContract(TypedDict):
     time_horizon: str
     basis_risk_notes: str
     url: str | None
+    snapshot_ts: str | None
+    as_of_ts: str | None
+
+
+class ContractEntity(TypedDict):
+    source: str
+    contract_id: str | None
+    event_id: str | None
+    question: str | None
+    description: str | None
+    resolution_source: str | None
+    category_raw: str | None
+    risk_category: str
+    risk_tags: str
+    market_type: str
+    subject_key: str | None
+    metric_key: str | None
+    comparator: str | None
+    threshold_value: str | None
+    threshold_unit: str | None
+    region_key: str
+    window_start_ts: str | None
+    window_end_ts: str | None
+    expiration_ts: str | None
+    geo_scope: str
+    time_horizon: str
+    basis_risk_notes: str
+    url: str | None
+    first_seen_ts: str
+    last_seen_ts: str
+
+
+class ContractSnapshot(TypedDict):
+    source: str
+    contract_id: str | None
+    as_of_date: str | None
+    as_of_ts: str | None
+    snapshot_ts: str
+    observation_method: str
+    implied_probability: float | None
+    yes_price: float | None
+    no_price: float | None
+    volume: float | None
+    liquidity: float | None
+    open_interest: float | None
+    active: bool
+    tradable: bool
 
 
 RISK_CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -57,10 +154,20 @@ RISK_CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "labor_market": ("jobs report", "nonfarm payroll", "payrolls", "jobless claims", "unemployment", "labor market"),
     "hurricane": ("hurricane", "tropical storm", "storm surge"),
     "weather": ("weather", "temperature", "rainfall", "snow", "heat wave", "blizzard"),
-    "pandemic_health": ("pandemic", "covid", "flu", "outbreak", "public health", "cdc", "who"),
+    "pandemic_health": ("pandemic", "covid", "flu", "outbreak", "public health", "cdc"),
     "equity_market": ("s&p", "nasdaq", "dow", "stock market", "equity", "spy", "qqq", "russell"),
     "geopolitical": ("election", "president", "congress", "war", "ceasefire", "nato", "china", "russia", "ukraine", "israel", "gaza", "iran"),
 }
+
+ZERO_TIMESTAMP_VALUES = {
+    "0001-01-01T00:00:00Z",
+    "0001-01-01 00:00:00+00",
+    "0001-01-01T00:00:00+00:00",
+}
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _unwrap_collection(raw_data: Any, preferred_key: str) -> list[dict[str, Any]]:
@@ -73,6 +180,21 @@ def _unwrap_collection(raw_data: Any, preferred_key: str) -> list[dict[str, Any]
         if isinstance(value, list):
             return [item for item in value if isinstance(item, dict)]
     return []
+
+
+def _clean_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _coalesce_text(*values: Any) -> str | None:
+    for value in values:
+        text = _clean_text(value)
+        if text:
+            return text
+    return None
 
 
 def _to_float(value: Any) -> float | None:
@@ -109,13 +231,15 @@ def _coerce_timestamp(value: Any) -> str | None:
         return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
     if isinstance(value, str):
         stripped = value.strip()
+        if not stripped or stripped in ZERO_TIMESTAMP_VALUES:
+            return None
         if stripped.isdigit():
             return datetime.fromtimestamp(int(stripped), tz=timezone.utc).isoformat()
         return stripped
     return None
 
 
-def _parse_timestamp(value: Any) -> datetime | None:
+def parse_timestamp(value: Any) -> datetime | None:
     normalized = _coerce_timestamp(value)
     if not normalized:
         return None
@@ -125,16 +249,29 @@ def _parse_timestamp(value: Any) -> datetime | None:
     except ValueError:
         return None
 
-    # Some API fields arrive as date-only strings like "2025-12-31".
-    # Treat those naive timestamps as UTC to avoid mixing timezone-aware and naive values.
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
 
     return parsed
 
 
+def _first_timestamp(*values: Any) -> str | None:
+    for value in values:
+        normalized = _coerce_timestamp(value)
+        if normalized:
+            return normalized
+    return None
+
+
+def _timestamp_to_date(value: Any) -> str | None:
+    parsed = parse_timestamp(value)
+    if not parsed:
+        return None
+    return parsed.astimezone(timezone.utc).date().isoformat()
+
+
 def _infer_time_horizon(expiration_ts: Any) -> str:
-    expiration_dt = _parse_timestamp(expiration_ts)
+    expiration_dt = parse_timestamp(expiration_ts)
     if not expiration_dt:
         return "unknown"
 
@@ -223,12 +360,60 @@ def _extract_polymarket_prices(market: dict[str, Any]) -> tuple[float | None, fl
     return yes_price, no_price
 
 
-def _kalshi_market_to_contract(
+def _extract_polymarket_token_ids(market: dict[str, Any]) -> list[str]:
+    raw_value = market.get("clobTokenIds")
+    if raw_value is None:
+        return []
+    if isinstance(raw_value, list):
+        return [str(token) for token in raw_value if str(token).strip()]
+    if not isinstance(raw_value, str):
+        return [str(raw_value)]
+
+    raw_value = raw_value.strip()
+    if not raw_value:
+        return []
+
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError:
+        return [item.strip() for item in raw_value.split(",") if item.strip()]
+
+    if isinstance(parsed, list):
+        return [str(token) for token in parsed if str(token).strip()]
+    return [str(parsed)]
+
+
+def _infer_market_type(raw_market_type: Any, question: str | None, outcomes: list[Any] | None = None) -> str:
+    lowered_type = str(raw_market_type or "").strip().lower()
+    lowered_question = (question or "").strip().lower()
+    outcome_count = len(outcomes or [])
+
+    if lowered_type in {"multi", "multi_outcome"}:
+        return "multi_outcome"
+    if outcome_count not in {0, 2}:
+        return "multi_outcome"
+    if lowered_question.startswith(("who will", "which ", "what ")) and "?" in lowered_question:
+        return "multi_outcome"
+    return "binary_yes_no"
+
+
+def _combine_rules(primary: Any, secondary: Any) -> str | None:
+    rule_parts = [part for part in [_clean_text(primary), _clean_text(secondary)] if part]
+    if not rule_parts:
+        return None
+    return "\n\n".join(rule_parts)
+
+
+def _kalshi_market_to_record(
     market: dict[str, Any],
     event: dict[str, Any] | None = None,
-) -> NormalizedContract:
-    question = market.get("title") or (event or {}).get("title")
-    category_raw = (event or {}).get("category")
+    snapshot_ts: str | None = None,
+) -> dict[str, Any]:
+    snapshot_ts = snapshot_ts or utc_now_iso()
+    question = _coalesce_text(market.get("title"), (event or {}).get("title"))
+    description = _combine_rules(market.get("rules_primary"), market.get("rules_secondary"))
+    resolution_source = None
+    category_raw = _clean_text((event or {}).get("category"))
     risk_category, risk_tags = map_risk_category(question, category_raw)
 
     yes_price = _midpoint(market.get("yes_bid_dollars"), market.get("yes_ask_dollars"))
@@ -245,13 +430,27 @@ def _kalshi_market_to_contract(
     status = str(market.get("status") or "").lower()
     active = status not in {"closed", "determined", "disputed", "finalized", "settled"}
 
-    combined_text = " ".join(part for part in [question or "", category_raw or ""] if part)
+    expiration_ts = _first_timestamp(
+        market.get("expiration_time"),
+        market.get("settlement_ts"),
+        market.get("close_time"),
+    )
+    as_of_ts = _first_timestamp(
+        market.get("updated_time"),
+        (event or {}).get("last_updated_ts"),
+        snapshot_ts,
+    )
+    combined_text = " ".join(
+        part for part in [question or "", category_raw or "", description or ""] if part
+    )
 
     return {
         "source": "kalshi",
-        "contract_id": market.get("ticker"),
-        "event_id": market.get("event_ticker") or (event or {}).get("event_ticker"),
+        "contract_id": _clean_text(market.get("ticker")),
+        "event_id": _coalesce_text(market.get("event_ticker"), (event or {}).get("event_ticker")),
         "question": question,
+        "description": description,
+        "resolution_source": resolution_source,
         "category_raw": category_raw,
         "risk_category": risk_category,
         "risk_tags": risk_tags,
@@ -260,40 +459,46 @@ def _kalshi_market_to_contract(
         "no_price": no_price,
         "volume": _to_float(market.get("volume_fp")),
         "liquidity": _to_float(market.get("liquidity_dollars")),
-        "expiration_ts": _coerce_timestamp(
-            market.get("expiration_time")
-            or market.get("settlement_ts")
-            or market.get("close_time")
-        ),
+        "open_interest": _to_float(market.get("open_interest_fp")),
+        "expiration_ts": expiration_ts,
         "active": active,
         "tradable": active,
         "geo_scope": _infer_geo_scope(combined_text),
-        "time_horizon": _infer_time_horizon(
-            market.get("expiration_time")
-            or market.get("settlement_ts")
-            or market.get("close_time")
-        ),
+        "time_horizon": _infer_time_horizon(expiration_ts),
         "basis_risk_notes": _build_basis_risk_note("Kalshi"),
-        "url": _build_kalshi_url(market.get("ticker")),
+        "url": _build_kalshi_url(_clean_text(market.get("ticker"))),
+        "snapshot_ts": snapshot_ts,
+        "as_of_ts": as_of_ts,
+        "as_of_date": _timestamp_to_date(as_of_ts or snapshot_ts),
+        "observation_method": "daily_close",
+        "market_type": _infer_market_type(market.get("market_type"), question),
     }
 
 
-def _polymarket_market_to_contract(
+def _polymarket_market_to_record(
     market: dict[str, Any],
     event: dict[str, Any] | None = None,
-) -> NormalizedContract:
-    question = market.get("question") or market.get("title") or (event or {}).get("title")
+    snapshot_ts: str | None = None,
+) -> dict[str, Any]:
+    snapshot_ts = snapshot_ts or utc_now_iso()
+    question = _coalesce_text(market.get("question"), market.get("title"), (event or {}).get("title"))
 
     linked_events = market.get("events")
     linked_event = linked_events[0] if isinstance(linked_events, list) and linked_events else {}
     if not isinstance(linked_event, dict):
         linked_event = {}
 
-    category_raw = (
-        market.get("category")
-        or (event or {}).get("category")
-        or linked_event.get("category")
-        or (event or {}).get("subcategory")
+    description = _coalesce_text(market.get("description"), (event or {}).get("description"))
+    resolution_source = _coalesce_text(
+        market.get("resolutionSource"),
+        (event or {}).get("resolutionSource"),
+        linked_event.get("resolutionSource"),
+    )
+    category_raw = _coalesce_text(
+        market.get("category"),
+        (event or {}).get("category"),
+        linked_event.get("category"),
+        (event or {}).get("subcategory"),
     )
     risk_category, risk_tags = map_risk_category(question, category_raw)
 
@@ -306,13 +511,25 @@ def _polymarket_market_to_contract(
     elif market.get("enableOrderBook") is not None:
         tradable = tradable and bool(market.get("enableOrderBook"))
 
-    combined_text = " ".join(part for part in [question or "", category_raw or ""] if part)
+    expiration_ts = _first_timestamp(market.get("endDate"), market.get("endDateIso"))
+    as_of_ts = _first_timestamp(
+        market.get("updatedAt"),
+        (event or {}).get("updatedAt"),
+        linked_event.get("updatedAt"),
+        snapshot_ts,
+    )
+    combined_text = " ".join(
+        part for part in [question or "", category_raw or "", description or "", resolution_source or ""] if part
+    )
+    token_ids = _extract_polymarket_token_ids(market)
 
     return {
         "source": "polymarket",
-        "contract_id": market.get("id") or market.get("conditionId"),
-        "event_id": (event or {}).get("id") or linked_event.get("id"),
+        "contract_id": _coalesce_text(market.get("id"), market.get("conditionId")),
+        "event_id": _coalesce_text((event or {}).get("id"), linked_event.get("id")),
         "question": question,
+        "description": description,
+        "resolution_source": resolution_source,
         "category_raw": category_raw,
         "risk_category": risk_category,
         "risk_tags": risk_tags,
@@ -321,20 +538,30 @@ def _polymarket_market_to_contract(
         "no_price": no_price,
         "volume": _to_float(market.get("volumeNum") or market.get("volume")),
         "liquidity": _to_float(market.get("liquidityNum") or market.get("liquidity")),
-        "expiration_ts": _coerce_timestamp(market.get("endDateIso") or market.get("endDate")),
+        "open_interest": _to_float(market.get("openInterest") or (event or {}).get("openInterest")),
+        "expiration_ts": expiration_ts,
         "active": active,
         "tradable": tradable,
         "geo_scope": _infer_geo_scope(combined_text),
-        "time_horizon": _infer_time_horizon(market.get("endDateIso") or market.get("endDate")),
+        "time_horizon": _infer_time_horizon(expiration_ts),
         "basis_risk_notes": _build_basis_risk_note("Polymarket"),
         "url": _build_polymarket_url(
-            market.get("id") or market.get("conditionId"),
-            market.get("slug") or (event or {}).get("slug"),
+            _coalesce_text(market.get("id"), market.get("conditionId")),
+            _coalesce_text(market.get("slug"), (event or {}).get("slug")),
         ),
+        "snapshot_ts": snapshot_ts,
+        "as_of_ts": as_of_ts,
+        "as_of_date": _timestamp_to_date(as_of_ts or snapshot_ts),
+        "observation_method": "daily_close",
+        "market_type": _infer_market_type(market.get("market_type"), question, market.get("outcomes")),
+        "yes_token_id": token_ids[0] if token_ids else None,
     }
 
 
-def normalize_kalshi_markets(raw_data: Any) -> list[dict[str, Any]]:
+def normalize_kalshi_markets(
+    raw_data: Any,
+    snapshot_ts: str | None = None,
+) -> list[dict[str, Any]]:
     events = _unwrap_collection(raw_data, "events")
     normalized: list[dict[str, Any]] = []
 
@@ -344,7 +571,7 @@ def normalize_kalshi_markets(raw_data: Any) -> list[dict[str, Any]]:
             if not isinstance(markets, list):
                 continue
             normalized.extend(
-                _kalshi_market_to_contract(market, event)
+                _kalshi_market_to_record(market, event, snapshot_ts=snapshot_ts)
                 for market in markets
                 if isinstance(market, dict)
             )
@@ -352,13 +579,16 @@ def normalize_kalshi_markets(raw_data: Any) -> list[dict[str, Any]]:
 
     markets = _unwrap_collection(raw_data, "markets")
     return [
-        _kalshi_market_to_contract(market)
+        _kalshi_market_to_record(market, snapshot_ts=snapshot_ts)
         for market in markets
         if isinstance(market, dict)
     ]
 
 
-def normalize_polymarket_markets(raw_data: Any) -> list[dict[str, Any]]:
+def normalize_polymarket_markets(
+    raw_data: Any,
+    snapshot_ts: str | None = None,
+) -> list[dict[str, Any]]:
     events = _unwrap_collection(raw_data, "events")
     normalized: list[dict[str, Any]] = []
 
@@ -368,7 +598,7 @@ def normalize_polymarket_markets(raw_data: Any) -> list[dict[str, Any]]:
             if not isinstance(markets, list):
                 continue
             normalized.extend(
-                _polymarket_market_to_contract(market, event)
+                _polymarket_market_to_record(market, event, snapshot_ts=snapshot_ts)
                 for market in markets
                 if isinstance(market, dict)
             )
@@ -376,7 +606,7 @@ def normalize_polymarket_markets(raw_data: Any) -> list[dict[str, Any]]:
 
     markets = _unwrap_collection(raw_data, "markets")
     return [
-        _polymarket_market_to_contract(market)
+        _polymarket_market_to_record(market, snapshot_ts=snapshot_ts)
         for market in markets
         if isinstance(market, dict)
     ]

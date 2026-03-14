@@ -8,6 +8,7 @@ import requests
 
 
 BASE_URL = "https://gamma-api.polymarket.com"
+CLOB_BASE_URL = "https://clob.polymarket.com"
 DEFAULT_TIMEOUT = 20
 
 
@@ -37,6 +38,7 @@ def _normalize_market_payload(market: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(market)
     normalized["outcomes"] = _parse_stringified_list(market.get("outcomes"))
     normalized["outcomePrices"] = _parse_stringified_list(market.get("outcomePrices"))
+    normalized["clobTokenIds"] = _parse_stringified_list(market.get("clobTokenIds"))
     return normalized
 
 
@@ -51,6 +53,20 @@ def _get_json(
     payload = response.json()
     if not isinstance(payload, list):
         raise ValueError(f"Expected a list response from Polymarket, got {type(payload)!r}")
+    return payload
+
+
+def _get_clob_json(
+    endpoint: str,
+    params: dict[str, Any] | None = None,
+    timeout: int = DEFAULT_TIMEOUT,
+) -> dict[str, Any]:
+    response = requests.get(f"{CLOB_BASE_URL}{endpoint}", params=params, timeout=timeout)
+    response.raise_for_status()
+
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError(f"Expected a dict response from Polymarket CLOB, got {type(payload)!r}")
     return payload
 
 
@@ -110,6 +126,22 @@ def fetch_active_markets(limit: int = 100, max_pages: int = 5) -> list[dict[str,
         offset += limit
 
     return markets
+
+
+def fetch_prices_history(
+    market_id: str,
+    start_ts: int,
+    end_ts: int,
+    interval: str = "1m",
+) -> dict[str, Any]:
+    """Fetch Polymarket CLOB price history for a token/market id."""
+    params = {
+        "market": market_id,
+        "startTs": start_ts,
+        "endTs": end_ts,
+        "interval": interval,
+    }
+    return _get_clob_json("/prices-history", params=params)
 
 
 def save_raw_polymarket_json(data: Any, output_path: str | Path) -> Path:

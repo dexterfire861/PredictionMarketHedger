@@ -78,6 +78,42 @@ def fetch_open_markets(limit: int = 200, max_pages: int = 5) -> list[dict[str, A
     return markets
 
 
+def fetch_historical_cutoff_timestamps() -> dict[str, Any]:
+    """Fetch the documented cutoff metadata for Kalshi historical APIs."""
+    return _get_json("/historical")
+
+
+def fetch_market_candlesticks(
+    series_ticker: str,
+    ticker: str,
+    start_ts: int,
+    end_ts: int,
+    period_interval: int = 1440,
+) -> dict[str, Any]:
+    """Fetch live Kalshi candlesticks for a market."""
+    params = {
+        "start_ts": start_ts,
+        "end_ts": end_ts,
+        "period_interval": period_interval,
+    }
+    return _get_json(f"/series/{series_ticker}/markets/{ticker}/candlesticks", params=params)
+
+
+def fetch_historical_market_candlesticks(
+    ticker: str,
+    start_ts: int,
+    end_ts: int,
+    period_interval: int = 1440,
+) -> dict[str, Any]:
+    """Fetch historical Kalshi candlesticks for a market."""
+    params = {
+        "start_ts": start_ts,
+        "end_ts": end_ts,
+        "period_interval": period_interval,
+    }
+    return _get_json(f"/historical/markets/{ticker}/candlesticks", params=params)
+
+
 def save_raw_kalshi_json(data: Any, output_path: str | Path) -> Path:
     """Persist raw Kalshi data for later inspection."""
     path = Path(output_path)
