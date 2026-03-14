@@ -1,0 +1,51 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+:root {
+  --bg-0: #080b14;
+  --bg-1: #0c1019;
+  --bg-2: #111620;
+  --bg-3: #161c28;
+  --bg-4: #1c2333;
+  --border: #1e2536;
+  --border-hover: #2a3348;
+  --text-1: #e4e7f0;
+  --text-2: #8b92a8;
+  --text-3: #545c72;
+  --text-4: #343b4f;
+  --gold: #c9a84c;
+  --gold-soft: rgba(201, 168, 76, 0.08);
+  --gold-border: rgba(201, 168, 76, 0.18);
+  --green: #3d9970;
+  --green-soft: rgba(61, 153, 112, 0.08);
+  --green-border: rgba(61, 153, 112, 0.18);
+  --red: #c0504d;
+  --red-soft: rgba(192, 80, 77, 0.08);
+  --blue: #5b8fd4;
+  --blue-soft: rgba(91, 143, 212, 0.08);
+  --amber: #d4a03a;
+  --amber-soft: rgba(212, 160, 58, 0.06);
+  --amber-border: rgba(212, 160, 58, 0.14);
+  --font-serif: 'Playfair Display', Georgia, 'Times New Roman', serif;
+  --font-body: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Menlo', monospace;
+  --radius: 3px;
+  --radius-lg: 4px;
+}
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg-0);
+  color: var(--text-1);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+#root { min-height: 100vh; }
+::selection { background: rgba(201, 168, 76, 0.2); }
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
